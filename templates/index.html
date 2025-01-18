@@ -1,0 +1,180 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLOv7 Detection</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .video-container { margin: 20px 0; }
+        .controls { margin: 20px 0; }
+        #chart { height: 400px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YOLOv7 Object Detection</h1>
+        
+        <!-- Image Upload Section -->
+        <div>
+            <h2>Image Detection</h2>
+            <input type="file" id="imageInput" accept="image/*">
+            <div id="imageResults" style="display: flex; margin-top: 20px;">
+                <div>
+                    <h3>Original Image</h3>
+                    <img id="originalImage" style="max-width: 500px;">
+                </div>
+                <div>
+                    <h3>Processed Image</h3>
+                    <img id="processedImage" style="max-width: 500px;">
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Video Upload Section -->
+        <div>
+            <!-- Add an option to upload video -->
+            <h2>Video Detection</h2>
+            <input type="file" id="videoInput" accept="video/*">
+            <video id="video" controls style="max-width: 100%;"></video>
+
+            <!-- Add confidence slider -->
+            <div class="controls">
+                <label for="confidence">Confidence Threshold:</label>
+                <input type="range" id="confidence" min="0" max="1" step="0.1" value="0.5">
+                <span id="confidenceValue">0.5</span>
+            </div>                                  
+
+            <!-- Processed Video -->
+            <div id="processedVideoContainer" style="margin-top: 20px;">
+                <h3>Processed Video</h3>
+                <video id="processedVideo" controls style="max-width: 100%; display: none;"></video>
+            </div>
+        </div>
+
+        <script>
+            // Image processing
+            document.getElementById('imageInput').addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const formData = new FormData();
+                formData.append('file', file);
+
+                // Đảm bảo URL đúng với địa chỉ Flask đang chạy
+                const response = await fetch('/upload_image', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('originalImage').src = 'data:image/jpeg;base64,' + data.original;
+                    document.getElementById('processedImage').src = 'data:image/jpeg;base64,' + data.processed;
+                } else {
+                    alert("Error uploading image.");
+                }
+            });
+
+
+            // Video upload function
+            document.getElementById('videoInput').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const videoElement = document.getElementById('video');
+                    videoElement.src = URL.createObjectURL(file);
+                    videoElement.style.display = 'block';  // Show the video element
+                }
+            });
+
+            // Video processing
+            async function uploadVideo() {
+                const fileInput = document.getElementById('videoInput');
+                const file = fileInput.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const response = await fetch('/upload_video', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.status === 'Video uploaded and processed successfully') {
+                    console.log(data.video_path);
+                    const videoElement = document.getElementById('processedVideo');
+                    videoElement.src = data.video_path; // The processed video path
+                    videoElement.style.display = 'block';  // Show processed video
+                }
+            }
+
+            // Camera Section
+            document.getElementById('startCamera').addEventListener('click', () => {
+                const streamElement = document.getElementById('cameraStream');
+                streamElement.innerHTML = `<img src="/video_feed?camera=true" width="640" height="480">`;
+                startChartUpdates();
+            });
+
+            document.getElementById('stopCamera').addEventListener('click', () => {
+                const streamElement = document.getElementById('cameraStream');
+                streamElement.innerHTML = '';
+                stopChartUpdates();
+            });
+
+            // Confidence threshold
+            const confidenceSlider = document.getElementById('confidence');
+            const confidenceValue = document.getElementById('confidenceValue');
+            
+            confidenceSlider.addEventListener('input', async (e) => {
+                confidenceValue.textContent = e.target.value;
+                await fetch('/update_confidence', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        confidence: e.target.value
+                    })
+                });
+            });
+
+            // Chart
+            const layout = {
+                title: 'Object Detection Counts Over Time',
+                xaxis: { title: 'Time (frames)' },
+                yaxis: { title: 'Count' }
+            };
+
+            let chart = Plotly.newPlot('chart', [], layout);
+            
+            function startChartUpdates() {
+                chartInterval = setInterval(async () => {
+                    const response = await fetch('/get_class_counts');
+                    const data = await response.json();
+                    
+                    const traces = Object.entries(data.counts).map(([className, count]) => ({
+                        x: [data.time],
+                        y: [count],
+                        name: className,
+                        mode: 'lines+markers'
+                    }));
+
+                    // Ensure we have valid traces to update
+                    if (traces.length > 0) {
+                        Plotly.update('chart', traces);
+                    }
+                }, 1000);
+            }
+
+            function stopChartUpdates() {
+                if (chartInterval) {
+                    clearInterval(chartInterval);
+                }
+            }
+        </script>
+    </div>
+</body>
+</html>
